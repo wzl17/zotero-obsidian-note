@@ -21,6 +21,10 @@ from typing import Any
 
 
 DEFAULT_STABLE_TAGS = ["paper", "literature-note", "zotero"]
+DEFAULT_VAULT_DIR = (
+    "/Users/wzl17/Library/CloudStorage/OneDrive-Personal/Personal/Files/"
+    "Obsidian/Notes/Research/Papers"
+)
 TOPIC_TAG_RULES = {
     "machine-learning": [
         "machine learning",
@@ -622,7 +626,11 @@ def build_parser() -> argparse.ArgumentParser:
     source = create.add_mutually_exclusive_group(required=True)
     source.add_argument("--query")
     source.add_argument("--item-key")
-    create.add_argument("--vault", required=True, help="Absolute or user-resolved Obsidian folder")
+    create.add_argument(
+        "--vault",
+        default=DEFAULT_VAULT_DIR,
+        help="Absolute or user-resolved Obsidian folder",
+    )
     create.add_argument(
         "--if-exists",
         choices=["error", "suffix", "overwrite"],

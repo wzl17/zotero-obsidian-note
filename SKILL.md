@@ -23,7 +23,13 @@ Resolve `<plugin-root>` by locating the installed Zotero plugin, or pass it expl
 python3 scripts/create_note.py status
 ```
 
-2. If the user did not provide an Obsidian vault folder, ask for it before writing anything.
+2. Default the vault folder to:
+
+```text
+/Users/wzl17/Library/CloudStorage/OneDrive-Personal/Personal/Files/Obsidian/Notes/Research/Papers
+```
+
+Ask for a different destination only when the user wants another location.
 3. Search Zotero with the paper title, DOI, citation key, or fuzzy query:
 
 ```bash
@@ -34,10 +40,10 @@ python3 scripts/create_note.py search --query "attention is all you need"
 5. Create the note only after you know the target item and vault path:
 
 ```bash
-python3 scripts/create_note.py create --query "attention is all you need" --vault "/absolute/path/to/vault/folder"
+python3 scripts/create_note.py create --query "attention is all you need"
 ```
 
-Use `--item-key` when the item is already known. Use `--if-exists suffix` only when the user explicitly wants a second file. Use `--if-exists overwrite` only with explicit confirmation.
+Use `--item-key` when the item is already known. Override the destination with `--vault "/other/path"` when needed. Use `--if-exists suffix` only when the user explicitly wants a second file. Use `--if-exists overwrite` only with explicit confirmation.
 
 ## Behavior
 
