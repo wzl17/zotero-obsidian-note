@@ -37,18 +37,37 @@ python3 scripts/create_note.py search --query "attention is all you need"
 ```
 
 4. If there are multiple plausible matches, ask the user to choose unless one result is clearly dominant.
-5. Create the note only after you know the target item and vault path:
+5. Resolve the item metadata before writing the note:
 
 ```bash
-python3 scripts/create_note.py create --query "attention is all you need"
+python3 scripts/create_note.py metadata --query "attention is all you need"
 ```
 
-Use `--item-key` when the item is already known. Override the destination with `--vault "/other/path"` when needed. Use `--if-exists suffix` only when the user explicitly wants a second file. Use `--if-exists overwrite` only with explicit confirmation.
+6. Generate the final `tags` yourself from the metadata, not with Python heuristics.
+   - Always include the stable tags `paper`, `literature-note`, and `zotero`.
+   - Preserve useful Zotero tags after normalizing them to Obsidian style.
+   - Infer 3-8 semantic topic tags from the title, abstract, venue, collections, and existing Zotero tags.
+   - Use lowercase kebab-case.
+   - Do not include a leading `#`.
+   - Keep each tag to at most 3 words.
+   - Avoid weak or generic tags such as `study`, `method`, `model`, `analysis`, `results`, or `paper`.
+   - Do not create very specific tags unless the abstract clearly supports them.
+   - Prefer durable research-area tags when supported by the metadata, such as `machine-learning`, `nlp`, `retrieval-augmented-generation`, `human-computer-interaction`, or `cognitive-science`.
+   - Do not use year, author names, or venue as tags unless the user explicitly asks for them as tags.
+7. Create the note only after you know the target item, vault path, and final tags:
+
+```bash
+python3 scripts/create_note.py create --query "attention is all you need" \
+  --tags-json '["paper","literature-note","zotero","transformers","machine-translation"]'
+```
+
+Repeated `--tag` flags are also supported. Use `--item-key` when the item is already known. Override the destination with `--vault "/other/path"` when needed. Use `--if-exists suffix` only when the user explicitly wants a second file. Use `--if-exists overwrite` only with explicit confirmation.
 
 ## Behavior
 
 - The helper preserves exact Zotero collections and Zotero tags in frontmatter.
-- It also generates conservative Obsidian tags such as `paper`, `zotero`, `literature-note`, normalized item type, year, venue, and a small set of domain/topic tags when title or abstract provide strong evidence.
+- The helper does not invent topic tags. Use the `metadata` output and generate the final tags in the LLM step.
+- If `create` is called without explicit tags, the helper should stop and tell you to provide LLM-generated tags.
 - The note body includes `# Title`, `## Abstract`, and `## Notes`.
 - The filename prefers the BibTeX citekey and otherwise falls back to first author, year, and a shortened title slug.
 - On conflicts, do not overwrite by default. Ask the user whether to overwrite, update missing fields manually, or create a suffixed filename.

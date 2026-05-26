@@ -25,58 +25,6 @@ DEFAULT_VAULT_DIR = (
     "/Users/wzl17/Library/CloudStorage/OneDrive-Personal/Personal/Files/"
     "Obsidian/Notes/Research/Papers"
 )
-TOPIC_TAG_RULES = {
-    "machine-learning": [
-        "machine learning",
-        "deep learning",
-        "neural network",
-        "representation learning",
-    ],
-    "nlp": [
-        "natural language processing",
-        "language model",
-        "large language model",
-        "transformer",
-        "text generation",
-        "tokenization",
-        "sequence-to-sequence",
-    ],
-    "computer-vision": [
-        "computer vision",
-        "image classification",
-        "object detection",
-        "segmentation",
-        "vision transformer",
-    ],
-    "hci": [
-        "human-computer interaction",
-        "human computer interaction",
-        "user study",
-        "usability",
-        "interaction design",
-    ],
-    "biology": [
-        "biology",
-        "genomics",
-        "protein",
-        "cell",
-        "molecular",
-        "bioinformatics",
-    ],
-    "robotics": [
-        "robot",
-        "robotics",
-        "motion planning",
-        "manipulation",
-        "autonomous system",
-    ],
-    "reinforcement-learning": [
-        "reinforcement learning",
-        "policy gradient",
-        "markov decision process",
-        "q-learning",
-    ],
-}
 
 
 @dataclass
@@ -300,35 +248,16 @@ def attachment_urls(helper: Path, item_key: str) -> list[str]:
     return urls
 
 
-def topic_tags(title: str, abstract: str) -> list[str]:
-    haystack = f"{title} {abstract}".lower()
-    found: list[str] = []
-    for tag, keywords in TOPIC_TAG_RULES.items():
-        hits = sum(1 for keyword in keywords if keyword in haystack)
-        if hits >= 1 and (tag in {"nlp", "machine-learning", "biology"} or hits >= 2):
-            found.append(tag)
-    return found
+def normalize_tag(tag: str) -> str:
+    words = re.findall(r"[A-Za-z0-9]+(?:['/][A-Za-z0-9]+)?", normalize_space(tag))
+    words = words[:3]
+    return slugify(" ".join(words), allow_slash=False) if words else ""
 
 
-def normalized_tags(data: dict[str, Any]) -> list[str]:
+def finalize_tags(zotero_tags: list[str], explicit_tags: list[str]) -> list[str]:
     tags: list[str] = list(DEFAULT_STABLE_TAGS)
-    item_type = normalize_space(data.get("itemType"))
-    publication = publication_from_item(data)
-    year = year_from_item(data)
-    title = normalize_space(data.get("title"))
-    abstract = normalize_space(data.get("abstractNote"))
-
-    if item_type:
-        tags.append(slugify(item_type))
-    if year:
-        tags.append(f"year-{year}")
-    if publication:
-        venue_slug = slugify(publication)
-        if venue_slug and len(venue_slug) <= 40:
-            tags.append(f"venue-{venue_slug}")
-    tags.extend(topic_tags(title, abstract))
-    tags.extend(slugify(tag, allow_slash=True) for tag in zotero_tags_from_item(data))
-
+    tags.extend(normalize_tag(tag) for tag in explicit_tags)
+    tags.extend(normalize_tag(tag) for tag in zotero_tags)
     seen: set[str] = set()
     ordered: list[str] = []
     for tag in tags:
@@ -338,6 +267,16 @@ def normalized_tags(data: dict[str, Any]) -> list[str]:
         seen.add(tag)
         ordered.append(tag)
     return ordered
+
+
+def parse_tags_json(raw: str) -> list[str]:
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"--tags-json must be valid JSON: {exc}") from exc
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise SystemExit("--tags-json must be a JSON array of strings")
+    return value
 
 
 def yaml_quote(text: str) -> str:
@@ -418,6 +357,36 @@ def build_note_content(data: dict[str, Any], *, created_on: str) -> str:
     )
 
 
+def note_metadata_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "title": payload.get("title"),
+        "authors": payload.get("authors") or [],
+        "year": payload.get("year"),
+        "item_type": payload.get("itemType"),
+        "publication": payload.get("publication"),
+        "doi": payload.get("doi"),
+        "url": payload.get("url"),
+        "zotero_key": payload.get("zotero_key"),
+        "citekey": payload.get("citekey"),
+        "collections": payload.get("collections") or [],
+        "zotero_tags": payload.get("zotero_tags") or [],
+        "attachment_urls": payload.get("attachment_urls") or [],
+        "abstract": payload.get("abstract") or "",
+        "suggested_filename": filename_for_note(payload),
+        "default_vault": DEFAULT_VAULT_DIR,
+        "required_base_tags": list(DEFAULT_STABLE_TAGS),
+        "tag_requirements": {
+            "required": True,
+            "count_guidance": "3-8 semantic topic tags plus the stable base tags",
+            "max_words_per_tag": 3,
+            "case": "lowercase",
+            "separator": "-",
+            "leading_hash": False,
+            "source": "Generate meaningful research-topic tags from the title, abstract, venue, collections, and existing Zotero tags.",
+        },
+    }
+
+
 def filename_for_note(data: dict[str, Any]) -> str:
     citekey = normalize_space(data.get("citekey"))
     if citekey:
@@ -474,14 +443,6 @@ def note_payload(helper: Path, base_url: str, *, item_key: str, fallback_citekey
         "abstract": normalize_space(data.get("abstractNote")) or "",
         "attachment_urls": attachments,
     }
-    payload["tags"] = normalized_tags(
-        {
-            **data,
-            "title": payload["title"],
-            "abstractNote": payload["abstract"],
-            "collectionNames": payload["collections"],
-        }
-    )
     return payload
 
 
@@ -514,6 +475,26 @@ def cmd_search(args: argparse.Namespace) -> None:
         ],
     }
     dump_json(payload)
+
+
+def cmd_metadata(args: argparse.Namespace) -> None:
+    helper = discover_zotero_helper(args.plugin_root)
+    status = run_helper(helper, "status", "--json") or {}
+    if not status.get("local_api_enabled_pref"):
+        raise SystemExit("Zotero local API is disabled. Enable it before resolving note metadata.")
+    if not status.get("api_running"):
+        raise SystemExit(
+            "Zotero local API is not reachable. Start Zotero or fix the local API before resolving note metadata."
+        )
+
+    item_key, fallback_citekey = resolve_target_item(helper, args.query, args.item_key)
+    payload = note_payload(
+        helper,
+        status.get("base_url") or "http://127.0.0.1:23119",
+        item_key=item_key,
+        fallback_citekey=fallback_citekey,
+    )
+    dump_json(note_metadata_payload(payload))
 
 
 def resolve_target_item(helper: Path, query: str | None, item_key: str | None) -> tuple[str, str | None]:
@@ -561,6 +542,15 @@ def cmd_create(args: argparse.Namespace) -> None:
         item_key=item_key,
         fallback_citekey=fallback_citekey,
     )
+    explicit_tags = list(args.tag or [])
+    if args.tags_json:
+        explicit_tags.extend(parse_tags_json(args.tags_json))
+    if not explicit_tags:
+        raise SystemExit(
+            "No tags were provided. Run the metadata command first, generate LLM-side tags, "
+            "then call create with --tag ... or --tags-json '[\"paper\", ...]'."
+        )
+    payload["tags"] = finalize_tags(payload.get("zotero_tags") or [], explicit_tags)
     note_text = build_note_content(payload, created_on=date.today().isoformat())
     filename = filename_for_note(payload)
     output_path, action = choose_output_path(Path(args.vault), filename, args.if_exists)
@@ -597,6 +587,22 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--limit", type=int, default=5)
     search.set_defaults(func=cmd_search)
 
+    metadata = subparsers.add_parser(
+        "metadata", help="Resolve a Zotero item and print metadata for LLM-side tag generation"
+    )
+    metadata_source = metadata.add_mutually_exclusive_group(required=True)
+    metadata_source.add_argument("--query")
+    metadata_source.add_argument("--item-key")
+    metadata.set_defaults(func=cmd_metadata)
+
+    inspect = subparsers.add_parser(
+        "inspect", help="Alias for metadata"
+    )
+    inspect_source = inspect.add_mutually_exclusive_group(required=True)
+    inspect_source.add_argument("--query")
+    inspect_source.add_argument("--item-key")
+    inspect.set_defaults(func=cmd_metadata)
+
     create = subparsers.add_parser("create", help="Create an Obsidian Markdown note for a Zotero item")
     source = create.add_mutually_exclusive_group(required=True)
     source.add_argument("--query")
@@ -611,6 +617,16 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["error", "suffix", "overwrite"],
         default="error",
         help="Conflict behavior for an existing note path",
+    )
+    create.add_argument(
+        "--tag",
+        action="append",
+        default=[],
+        help="Explicit tag to include. Repeat for multiple tags; these should come from the LLM metadata step.",
+    )
+    create.add_argument(
+        "--tags-json",
+        help='JSON array of tags, for example \'["paper","literature-note","zotero"]\'',
     )
     create.set_defaults(func=cmd_create)
 

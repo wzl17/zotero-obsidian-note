@@ -1,4 +1,4 @@
 interface:
   display_name: "Zotero Obsidian Note"
   short_description: "Create Obsidian notes from Zotero papers"
-  default_prompt: "Use $zotero-obsidian-note to find a paper in my Zotero library and create an Obsidian-compatible Markdown literature note for it."
+  default_prompt: "Use $zotero-obsidian-note to find a paper in my Zotero library, inspect its metadata, generate Obsidian tags from the abstract, and create a Markdown literature note."
