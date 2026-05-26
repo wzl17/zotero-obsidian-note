@@ -300,13 +300,6 @@ def attachment_urls(helper: Path, item_key: str) -> list[str]:
     return urls
 
 
-def path_from_file_url(url: str) -> str | None:
-    if not url.startswith("file://"):
-        return None
-    parsed = urllib.parse.urlparse(url)
-    return urllib.request.url2pathname(parsed.path)
-
-
 def topic_tags(title: str, abstract: str) -> list[str]:
     haystack = f"{title} {abstract}".lower()
     found: list[str] = []
@@ -369,17 +362,6 @@ def yaml_list(lines: list[str], key: str, values: list[Any]) -> None:
         lines.append(f"  - {yaml_scalar(value)}")
 
 
-def unique_list(values: list[str]) -> list[str]:
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for value in values:
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        ordered.append(value)
-    return ordered
-
-
 def build_frontmatter(data: dict[str, Any], *, created_on: str) -> str:
     lines = ["---"]
     authors = data.get("authors") or []
@@ -400,7 +382,6 @@ def build_frontmatter(data: dict[str, Any], *, created_on: str) -> str:
     primary_url = normalize_space(data.get("url")) or None
     if primary_url:
         lines.append(f"url: {yaml_scalar(primary_url)}")
-    yaml_list(lines, "urls", data.get("urls") or [])
 
     for key in ("zotero_key", "citekey"):
         value = data.get(key)
@@ -409,9 +390,6 @@ def build_frontmatter(data: dict[str, Any], *, created_on: str) -> str:
 
     attachment_urls_value = data.get("attachment_urls") or []
     yaml_list(lines, "attachment_urls", attachment_urls_value)
-
-    pdf_paths = data.get("pdf_paths") or []
-    yaml_list(lines, "pdf_paths", pdf_paths)
 
     tags = data.get("tags") or []
     yaml_list(lines, "tags", tags)
@@ -479,7 +457,6 @@ def note_payload(helper: Path, base_url: str, *, item_key: str, fallback_citekey
     authors = creators_from_item(data)
     zotero_tags = zotero_tags_from_item(data)
     attachments = attachment_urls(helper, item_key)
-    pdf_paths = [path for path in (path_from_file_url(url) for url in attachments) if path]
     citekey = fallback_citekey or extract_bibtex_key(helper, item_key)
 
     payload = {
@@ -496,9 +473,7 @@ def note_payload(helper: Path, base_url: str, *, item_key: str, fallback_citekey
         "zotero_tags": zotero_tags,
         "abstract": normalize_space(data.get("abstractNote")) or "",
         "attachment_urls": attachments,
-        "pdf_paths": pdf_paths,
     }
-    payload["urls"] = unique_list(([payload["url"]] if payload["url"] else []) + attachments)
     payload["tags"] = normalized_tags(
         {
             **data,
